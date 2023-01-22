@@ -1,0 +1,755 @@
+---
+document_class: article
+title: "**Métodos supervisados: Reconocimiento de género basado en voz**"
+subtitle: ""
+author: "Sergio Sáez Bombín"
+date: "23-01-2023"
+classoption: titlepage,twoside
+urlcolor: blue
+lang: ES
+header-includes:
+- \usepackage{fancyhdr}
+- \pagestyle{fancy}
+- \usepackage{titling}
+- \pretitle{\begin{center}\LARGE\includegraphics[width=12cm]{uimp_logo.png}\\[\bigskipamount]}
+- \posttitle{\end{center}}
+- \fancyhead[R]{\includegraphics[width=3cm]{uimp_logo.png}}
+- \fancyhead[L]{MUIIA - Métodos supervisados}
+- \fancyfoot[CO,CE]{Reconocimiento de género basado en voz}
+- \fancyfoot[LE,RO]{\thepage}
+- \addtolength{\headheight}{1.0cm}
+output: 
+  pdf_document:
+    toc: true
+    toc_depth: 3
+---
+
+\newpage
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Introducción
+## 1.1. Dataset seleccionado
+
+Para este ejercicio se ha decidido optar por un dataset de [Kaggle](https://Kaggle.com)  conformado por estadísticos frecuenciales de distintas señales de voz, cuyo objetivo es permitir la clasificación del género del emisor. Este dataset es conocido como ***[Gender Recognition by Voice](https://www.kaggle.com/datasets/primaryobjects/voicegender)*** y el fichero RMarkdown relativo a este trabajo se encuentra en el siguiente enlace de [GitHub](https://github.com/sergiosaez6/data-analysis-caret-r).
+
+En primer lugar, vamos a cargar el dataset elegido en R, con el objetivo de comenzar la exploración de este y la toma de decisiones en cuanto a su preparación para nuestro modelo de clasificación:
+
+```{r, message=FALSE}
+library(caret)
+library(mlbench)
+voice <- read.csv("voice.csv")
+names(voice)
+```
+
+Con este sencillo código podemos ver ya de qué variabes (columnas) está compuesto nuesstro dataset, y con el siguiente, vamos a poder ver el tipo de datos que tenemos por cada una de ellas. Además, también se nos indica que disponemos de 3168 observaciones con 21 variables:
+
+```{r}
+str(voice)
+```
+
+En concreto, vamos a disponer de 20 variables predictoras (todas ellas de tipo *'num'*) y una única variable a predecir o variable objetivo, ***label***, que puede tomar los valores ***female*** o ***male***, y es de tipo *'chr'*. Por este motivo, y con el objetivo de poder alimentar a un algoritmo clasificador, debemos modificar este tipo de variable a predecir a una de tipo *'num'* (pasando por un tipo *factor* para evitar la introducción de valores nulos por coerción), quedando el mapeo como se muestra:
+
+* *"female"* : *1*
+
+* *"male"* : *2*
+
+```{r}
+str(voice$label[1])
+str(voice$label[1700])
+voice$label <- as.factor(as.character(voice$label))
+str(voice$label[1])
+str(voice$label[1700])
+```
+
+Por otro lado, tal y como se ha mencionado anteriormente, las 20 variables predictoras consisten en una serie de estadísticos frecuenciales de la voz de las personas grabadas bajo estudio. En concreto, la descripción de estas variables son las siguientes: 
+
+```{r echo=FALSE, results='asis'}
+library(knitr)
+V = matrix(
+  c("1","meanfreq","Frecuencia media (en kHz)","2","sd","Desviación estándar de la frecuencia",
+    "3","median","Mediana de la frecuencia (en kHz)","4","Q25","Primer cuantil (en kHz)",
+    "5","Q75","tercer cuantil (en kHz)","6","IQR","Rango intercuantil (en kHz)",
+    "7","skew","Sesgo","8","kurt","Curtosis","9","sp.ent","Entropía espectral",
+    "10","sfm","Planitud espectral","11","mode","Moda de la frecuencia",
+    "12","centroid","Centroide de la frecuencia",
+    "13","meanfun","Media de la frecuencia fundamental medida a lo largo de la señal acústica",
+    "14","minfun","Frecuencia fundamental mínima medida a lo largo de la señal acústica",
+    "15","maxfun","Frecuencia fundamental máxima medida a lo largo de la señal acústica",
+    "16","meandom","Media de la frecuencia dominante medida a lo largo de la señal acústica",
+    "17","mindom","Frecuencia dominante mínima medida a lo largo de la señal acústica",
+    "18","maxdom","Frecuencia dominante máxima medida a lo largo de la señal acústica",
+    "19","dfrange","Rango de la frecuencia dominante media a lo largo de la seña acústica",
+    "20","modindx","Índice de modulación."
+    ),
+  nrow=20,
+  ncol=3,
+  byrow=TRUE
+  )
+
+kable(V, caption="Variables predictoras", align="ccc", color="black", background="lightgrey")
+```
+
+Cabe mencionar que lo primero a realizar antes de la comparación de variables, es analizar:
+
+1. Si es necesario realizar alguna imputación de datos en nuestro dataset.
+2. Si se dispone de un desbalanceo entre clases.
+
+Para ello, se va a comprobar tanto si hay algún dato *NA* entre los datos como el número de instancias de cada clase (columna *label*).
+```{r}
+sum(is.na(voice))
+table(voice$label)
+```
+
+Tras esto, podemos ver que nuestros datos están completos y tenemos un balanceo perfecto entre las clases, por lo que no es necesario aplicar ninguna técnica de imputación de datos, así como de balanceo de clases.
+
+A continuación, y antes de ahondar en el análisis que se realiza sobre los datos y cómo entrenar los algoritmos de clasificación, se van a presentar algunas variables predictoras de interés, así como explicar algunos conceptos que puedan no ser conocidos relativos a estas.
+
+Como se ha comentado, el dataset consiste en un conjunto de estadísticos (media, desviación típica, moda, cuantiles, etc.) que se consideran conocidos ya que son comunes en cualquier análisis de datos. Sin embargo, sí se considera de interés explicar sobre qué datos (y su naturaleza) se calculan estos estadísticos, que no son más que las señales de voz de distintas personas, siendo las frecuencias de estas señales (sus estadísticos) nuestras variables predictoras.
+
+La naturaleza de estas variables predictoras son ondas de presión (que una vez muestreadas pueden considerarse electromagnéticas al pasarse por un micrófono), que pueden ser descompuestas en la suma de señales senoidales de las distintas frecuencias que se encuentran en ella (sin entrar en el detalle, esto se debe al trabajo de Fourier, con las series y Transformada de Fourier, que han permitido el desarrollo del análisis de todo tipo de señales). Por ello, a continuación se explican algunos conceptos con respecto a las señales, que se pueden ver en las variables predictoras del dataset:
+
+* **Entropía espectral:** Es una normalización de la entropía de Shannon, que lo que indica es la presencia de información en la señal, es decir, permite distinguir entre el ruido y la señal generada por la voz. Valores pequeños de entropía espectral indican presencia de más información (voz), mientras que valores elevados indican poca información (ruido).
+* **Planitud espectral:** Otro tipo de entropía, representa lo mismo que la entropía espectral, ya que valores elevados corresponden a ruido, y valores reducidos a la presencia de voz.
+* **Frecuencia fundamental:** A pesar de no ser una variable predictora en sí misma, se encuentra en tres de ellas. Se trata la frecuencia mínima encontrada en la señal.
+* **Freucencia dominante:** Al igual que la anterior, no es una variable predictora pero sí se utiliza para calcular cuatro de ellas. Es ña frecuencia con mayor magnitud (amplitud) de la señal.
+* **Índice de modulación:** En el dataset es calculado como la diferencia absoluta acumulada entre medidas de frecuencias fundamentales adyacentes, divididas por el rango frecuencial.
+
+Finalmente, se muestran gráficas de visualización de los histogramas de algunas de las variables predictoras. Se ha optado por elegir *sp.ent* y *sfm* por su definición tan parecida, y *meanfun* e *IQR* por ser consideradas clave para la clasificación por los [autores del dataset](https://www.kaggle.com/datasets/primaryobjects/voicegender))):
+```{r, echo=FALSE, message=FALSE, fig.show='hold', out.width='50%', fig.cap='Histogramas de variables sp.ent y sfm'}
+ggplot(voice, aes(x=sp.ent, color=label)) + geom_histogram(fill="white")
+ggplot(voice, aes(x=sfm, color=label)) + geom_histogram(fill="white")
+```
+```{r, echo=FALSE, message=FALSE, fig.show='hold', out.width='50%', fig.cap='Histogramas de variables meanfun e IQR'}
+ggplot(voice, aes(x=meanfun, color=label)) + geom_histogram(fill="white")
+ggplot(voice, aes(x=IQR, color=label)) + geom_histogram(fill="white")
+```
+
+Aquí se puede ver que, a pesar de representar la misma o semejante información, las variables *sp.ent* y *sfm* no tienen distribuciones tan parecidas como cabría esperar por su definición, por lo que habrá que esperar a comparar las correlaciones entre ellas para determinar si finalmente debemos descartar alguna de las dos. Por otro lado, efectivamente se puede ver que las variables *meanfun* e *IQR* podrían ser consideradas clave en la clasificación, ya que hay una clara distinción entre las clases en sus distribuciones: por encima de un valor de $meanfun>0.15$ aproximadamente, prácticamente solamente se tienen muestras de la clase *female*, mientras que por debajo hay que utilizar la variable *IQR* para determinar la clase ($IQR\leq0.6$-$IQR\leq0.8$ aproximadamente, se consideraría *female*).
+
+
+## 1.2. Secciones del notebook
+Tras introducir el dataset, a continuación se presenta una explicación a alto nivel de cómo se estructura este notebook, y por tanto qué se va a presentar. La aproximación tomada para este trabajo es la siguiente:
+
+* **Análisis y limpieza del dataset**: En primer lugar se comprobará el estado del dataset, así como cualquier correlación, dependencia, etc. que pueda encontrarse entre las variables predictoras, y que suponga una eliminación de estas.
+* **Selección de variables**: Algún método de selección de variables.
+* **Extracción de variables**: PCA.
+* **Entrenamiento *10-fold cross-validation*** con varios clasificadores:
+  + Con los datos tras su limpieza &#8594; *trainingBase*
+  + Con los datos tras la selección de variables &#8594; *trainingFS*
+  + Con los datos tras la extracción de variables &#8594; *trainingFE*
+* **Comparativa de resultados para cada caso anterior.**
+
+\newpage
+
+# 2. Preprocesado de datos
+
+## 2.1. Particionado de dataset para entrenamiento y test
+En primer lugar, es necesario separar nuestros datos entre entrenamiento y test con el objetivo de que nuestro algoritmo no vea datos que se usarán en la fase de predicción. La separación que se realiza es de 75% del conjunto completo de datos para entrenamiento, y el 25% restante para test.
+```{r, echo=FALSE, message=FALSE}
+library(doParallel)
+cl <- makePSOCKcluster(parallel::detectCores())
+registerDoParallel(cl)
+```
+```{r, message=FALSE}
+
+set.seed(206)
+
+inTrain <- createDataPartition(voice$label, p=.75, list=FALSE)
+
+training <- voice[inTrain,]
+testing <- voice[-inTrain,]
+```
+
+
+## 2.2. Análisis de variables
+A continuación, una vez separados los datos de entrenamiento y test, realizamos el análisis de las variables predictoras para extraer cualquier dependencia o correlación entre ellas, así como desechar variables que aporten escasa o ninguna información.
+
+Para ello, comenzamos explorando los datos, haciendo uso del paquete \texttt{skimr} (eliminamos del \texttt{summary} el histograma de cada variable predictora para evitar errores en la generación del PDF con Latex.)
+```{r}
+library(skimr)
+summary <- skim(training)
+summary[,c(1:14)]
+```
+
+Esta tabla también nos indica lo que habíamos visto anteriormente de manera "manual", y que se mantiene tras la separación de datos entre el conjunto de entrenamiento y el de test: **no hay datos faltantes** (columnas *n_missing* de todas las variables a 0, y columnas *complete_rate* a 1) y nuestras **clases están completamente balanceadas** (la columna *top_counts* de nuestra variable a predecir, *label*, nos indica que tenemos las mismas instancias de ambas clases, 1188).
+
+Revisando la tabla "a vista de pájaro", podemos ver que tenemos tanto variables predictoras cuyos valores tienen alta variabilidad como otras con baja. Por ello, y siguiendo el índice del paquete [\texttt{caret}](https://topepo.github.io/caret/index.html), vamos a comprobar las variables predictoras que tengan poca varianza (cercana a 0), así como relaciones de correlación y dependencia lineal entre ellas.
+
+*Nota: Para ninguna de estas operaciones se va a normalizar las variables previamente ya que no es necesario:*
+
+* *Varianza: Considera cada variable individualmente.*
+* *Correlación: La correlación mide la relación lineal entre dos variables, es decir, la medida en que varían juntas. La normalización no afecta a la relación lineal entre las variables, por lo que no es necesario normalizar los datos antes de calcular la correlación.*
+* *Dependencias lineales: Justificando de manera semejante que con la correlación, al tratarse de una dependencia/relación lineal, la normalización no afecta.*
+
+
+### 2.2.1. Varianza cero o cercana a cero
+La presencia de variables predictoras con varianza cero o cercana a cero hace que no aporten ningún tipo de información a nuestro modelo que ayude a discernir o predecir la clase de una instancia de entrenamiento. Por lo tanto, todas las variables predictoras que cumplan con este supuesto, pueden ser eliminadas de nuestro dataset.
+
+Para realizar este cálculo, hacemos uso de la función \texttt{nearZeroVar} del paquete \texttt{caret}:
+```{r}
+nzv <- nearZeroVar(training, saveMetrics=TRUE)
+nzv
+```
+
+Como se puede observar, no hay **ninguna variable predictora** cuya **varianza sea cero o cercana a cero**, por lo que podemos continuar el análisis con todas las variables.
+
+
+### 2.2.2. Variables predictoras correladas
+Por otro lado, dos variables correladas entre sí podrían considerarse como que están aportando información semejante o redundante con respecto a la variable clase.
+
+A continuación, se va a comprobar si algunas de las variables predictoras está correlacionada entre sí, de tal manera qe podamos eliminar alguna de ellas. Denominando al coeficiente de correlación *r*, podemos entender una baja o alta correlación en base a los siguientes valores de r (en valor absolito):
+
+* *r<0.25* = Baja correlación
+* *0.25<r<0.5* = Correlación débil
+* *0.5<r<0.75* = Correlación moderada
+* *r>0.75* = Alta correlación
+
+Para este ejercicio, solamente vamos a eliminar las variables predictoras que estén **altamente correlacionadas**, es decir, cuyo *r>0.75*.
+
+```{r, out.width='100%', fig.align='center', fig.cap='Matriz de correlación entre variables predictoras'}
+library('plot.matrix')
+r <- 0.75
+varTraining <- training[,c(1:20)]
+correlation <- cor(varTraining)
+plot(correlation>r, 
+     main=paste("Correlation>",r), 
+     cex.lab=0.5,
+     cex.axis=0.5,
+     axis.col=list(side=1, las=2), axis.row = list(side=2, las=1))
+```
+
+En primer lugar, se muestra una matriz lógica en la que determinamos si la correlación entre las variables es mayor o menor que el valor indicado. Con esta representación se confirma lo que se indicaba cuando se exploraron algunas variables predictoras al inicio del trabajo $\rightarrow$ la entropía espectral (sp.ent) y la planitud espectral (sfm) están altamente correlacionadas. Además, se puede ver a simple vista que hay varios casos de correlación entre variables, como también se muestra en la siguiente \texttt{Figura 4}, acompañada del resumen estadístico de la correlación de variables. Teniendo en cuenta que esta es una matriz simétrica con respecto a la diagonal, solamente debemos considerar la parte triangular superior de esta (incluimos la función \texttt{upper.tri} para ello).
+
+```{r, out.width = '75%', fig.align = 'center', fig.cap='Matriz triangular superior de correlación, marcado en verde los límites de alta correlación y en azul el primer y tercer cuantil'}
+corrSummary <- summary(correlation[upper.tri(correlation)])
+corrSummary
+plot(correlation[upper.tri(correlation)])
+abline(h=r, col="darkgreen")
+abline(h=-r, col="darkgreen")
+abline(h=corrSummary[2], col="blue", lwd = 4, lty = 4)
+abline(h=corrSummary[5], col="blue", lwd = 4, lty = 4)
+```
+
+Por lo tanto, tras confirmar que tenemos variables predictoras altamente correlacionadas, debemos identificarlas y posteriormente eliminarlas de nuestros datos para continuar el análisis.
+```{r}
+highCorr <- findCorrelation(abs(correlation), cutoff=r)
+highCorr
+```
+
+Tras eliminarlas, comprobamos que efectivamente, el resumen estadístico ha mejorado: tanto correlación mínima y máxima como el 1er y 3er cuantil son más cercanos a 0, indicando que el 75% de las variables están menos correlacionadas que antes.
+```{r, out.width = '75%', fig.align = 'center', fig.cap='Matriz triangular superior de correlación, marcado en verde los límites de alta correlación y en azul el primer y tercer cuantil'}
+trainingUncorr <- varTraining[,-highCorr]
+correlation2 <- cor(trainingUncorr)
+corrSummary2 <- summary(correlation2[upper.tri(correlation2)])
+corrSummary2
+plot(correlation2[upper.tri(correlation2)])
+abline(h=r, col="darkgreen")
+abline(h=-r, col="darkgreen")
+abline(h=corrSummary2[2], col="blue", lwd = 4, lty = 4)
+abline(h=corrSummary2[5], col="blue", lwd = 4, lty = 4)
+```
+
+Como ejemplo, se muestran un caso de dos variables no correladas (\texttt{Figura 6}) y otro de variables correladas (\texttt{Figura 7}) a través de sendos gráficos:
+
+```{r, echo=FALSE, out.width = '75%', fig.align = 'center', fig.cap='Variables median vs. dfrange'}
+library(ggplot2)
+r <- round(cor(varTraining$dfrange, varTraining$median), 2)
+p <- cor.test(varTraining$dfrange, varTraining$median)$p.value
+ggplot(varTraining, aes(x=median, y=dfrange)) + 
+  geom_point() + 
+  geom_smooth(formula = y ~ x, method="lm", col="red", fill="black") + 
+  annotate("text", x=0.1, y=20, label=paste0("r = ", r), hjust=0) +
+  annotate("text", x=0.1, y=19, label=paste0("p = ", round(p, 3)), hjust=0) +
+  theme_classic()
+```
+```{r, echo=FALSE, out.width = '75%', fig.align = 'center', fig.cap='Variables median vs. meanfreq'}
+r <- round(cor(varTraining$meanfreq, varTraining$median), 2)
+p <- cor.test(varTraining$meanfreq, varTraining$median)$p.value
+ggplot(varTraining, aes(x=median, y=meanfreq)) + 
+  geom_point() + 
+  geom_smooth(formula = y ~ x, method="lm", col="red", fill="black") + 
+  annotate("text", x=0.1, y=0.3, label=paste0("r = ", r), hjust=0) +
+  annotate("text", x=0.1, y=0.28, label=paste0("p = ", round(p, 3)), hjust=0) +
+  theme_classic()
+```
+
+
+Por lo tanto, debemos eliminar estas variables de nuestro dataset de entrenamiento original, *training*.
+```{r}
+trainingUncorr <- training[,-highCorr]
+```
+\newpage
+
+### 2.2.3. Dependencias lineales entre variables
+De manera similar al anterior apartado, es necesario encontrar variables predictoras que compartan dependencias lineales entre sí. Esto es así porque estas variables, en realidad, lo que aportan es, en realidad, la misma información.
+
+Para identificar si existen o no dependencias lineales entre estas variables predictoras, se va a utilizar la función *findLinearCombos* del paquete \texttt{caret}:
+```{r}
+linearities <- findLinearCombos(trainingUncorr[1:12])
+linearities
+```
+
+Este resultado nos indica que **no hay ninguna dependencia lineal entre variables predictoras**, por lo que no debemos eliminar ninguna.
+
+Finalmente, tras estas comprobaciones, disponemos de las siguientes 12 variables predictoras, que guardaremos como nuestro dataset base (*trainingBase*) junto a la variable clase:
+```{r, echo=FALSE}
+colnames(trainingUncorr)
+trainingBase <- training[,-highCorr]
+colnames(trainingBase)
+```
+
+\newpage
+
+# 3. Selección y extracción de variables predictoras
+Recordemos que en este trabajo se va a realizar un entrenamiento con validación cruzada *10-fold*. Con esto cabe la pregunta: ¿Se debería realizar la selección y extracción de variables para cada *fold* o previo a estas tareas?
+
+Hablando de forma estricta, las técnicas de selección y extracción deben aplicarse de manera independiente en cada *fold*, de tal manera que no  hay forma posible de que durante el entrenamiento algún tipo de información (derivada de estas técnicas) se encuentre tanto en el set de entrenamiento como el de validación.
+
+Para este trabajo, la selección de variables se realizará también con validación cruzada *10-fold*, utilizando la misma semilla que se utilizará durante el entrenamiento. De esta forma, los conjuntos de datos se dividirán exactamente de la misma forma en ambas ocasiones, evitando cualquier tipo de contaminación entre el set de entrenamiento y de validación.
+
+Por otro lado, con respecto a la extracción de variables, en la sección 3.2 se explicará la técnica utilizada y la justificación de ciertas decisiones, utilizando el set de datos completo. Sin embargo, para el entrenamiento, se aplicará esta misma técnica para cada *fold* de manera independiente, buscando así una clasificación honesta.
+
+
+## 3.1. Selección de variables
+Tal y como se ha indicado al inicio de este notebook, una de las tareas a realizar en cuanto al *pipeline* de análisis de datos aquí llevado a cabo es la selección de variables. Para esta tarea, se va a utilizar lo que se conoce como ***Recursive Feature Elimination***, siguiendo el índice del paquete \texttt{caret} ([enlace](https://topepo.github.io/caret/recursive-feature-elimination.html#recursive-feature-elimination-via-caret)).
+
+Este método ejecuta una búsqueda hacia atrás de qué variables son más importantes para el rendimiento del modelo. Es un proceso iterativo en el que, partiendo de todas las variables predicotras de las que dispone el modelo, va reentrenándolo eliminando aquellas que se queden fuera del grupo de variables más importantes.
+
+Para este ejercicio se realizará este algoritmo con una validación cruzada *10-fold*, con tamaños de set de variables de 1 a 6, y con funciones de Naive Bayes (aunque no se define ningún modelo en específico):
+```{r, cache=TRUE}
+library(klaR)
+
+set.seed(206)
+
+normalization <- preProcess(trainingBase[1:12])
+x <- predict(normalization, trainingBase[1:12])
+x <- as.data.frame(x)
+
+ctrl <- rfeControl(functions = nbFuncs, method = "cv", verbose = TRUE)
+rfeProfile <- rfe(x=x, y=trainingBase$label,
+                 sizes = c(1:6),
+                 rfeControl = ctrl)
+rfeProfile
+```
+
+Este resultado corrobora lo que se introducía al inicio del trabajo, las variables *meanfun* e *IQR* son las principales predictoras de la clase. Por lo tanto, vamos a reducir nuestro conjunto de variables predictoras a solamente dos (*trainingFS*):
+```{r}
+trainingFS <- trainingBase[predictors(rfeProfile)]
+trainingFS$label <- trainingBase$label
+```
+
+
+## 3.2. Extracción de variables
+
+Con respecto a la extracción de variables predictoras, se va a ejecutar, tal y como se solicita en el enunciado del trabajo, un ***Principal Component Anlysisis* (PCA)**. Este método de extracción de variables lo que busca es reducir la dimensionalidad de nuestros datos a partir de combinaciones lineales de las variables predictoras. Es decir, intenta reducir las variables predictoras a utilizar, generando unas nuevas que contengan toda la información, de manera conjunta, que estaba presente en nuestras variables originales.
+
+Para ello, vamos a utilizar la función \texttt{prcomp}, centrando y escalando previa ejecución, con el objetivo de que todas las variables tengan una distribución normal:
+```{r}
+pca <- prcomp(trainingBase[,1:12], center=TRUE, scale=TRUE)
+pca
+summary(pca)
+```
+
+Como se puede extraer del resultado, un tercio de la varianza de las componentes se concentra en la primera componente, quedando repartida la varianza de datos completa entre el resto de componentes. La cantidad de componentes principales (o vectores propios) a elegir en un (PCA) depende del objetivo de la investigación y de la cantidad de datos disponibles. En general, se suele elegir el número de componentes que explican una cantidad significativa de la varianza en los datos. Sin embargo, la elección final debe basarse en un equilibrio entre la explicación de la varianza y la interpretabilidad de los componentes.
+
+```{r, out.width = '75%', fig.align = 'center', fig.cap='Proporción de varianza que aporta cada una de las componentes principales'}
+ggplot(as.data.frame(pca$sdev^2/sum(pca$sdev^2)), 
+       aes(x = 1:length(pca$sdev), y = pca$sdev^2/sum(pca$sdev^2))) + 
+  geom_line() + 
+  xlab("Número de componentes principales") + 
+  ylab("Proporción de varianza aportada")
+```
+```{r, out.width = '75%', fig.align = 'center', fig.cap='Varianza total acumulada por cada componente principale adicional considerada'}
+ggplot(as.data.frame(pca$sdev^2/sum(pca$sdev^2)), 
+       aes(x = 1:length(pca$sdev), y = cumsum(pca$sdev^2/sum(pca$sdev^2)))) + 
+  geom_line() + 
+  xlab("Número de componentes principales") + 
+  ylab("Varianza acumulada")
+```
+
+Estas gráficas \texttt{(Figura 8} y \texttt{Figura 9}) nos indican cuánto aporta cada componente a la varianza de los datos. Analizando estas, podemos ver que con 6 componentes principales (reduciendo a la mitad el número de variables predictoras) podemos mantener alrededor del 82% de la varianza de los datos, aportando, a partir de este punto menos de un 5% por cada nueva componente que se añade. Por lo tanto, para el ejercicio se priorizará reducir a la mitad el número de variables predictoras, considerándose solamente las primeras 6 componentes principales.
+
+En el enunciado del ejercicio se solicita que se visualicen las dos primeras componentes principales resultantes, para poder intuir una separabilidad entre clases. Para ello se hace uso del paquete ***ggbiplot*** [(enlace)](https://github.com/vqv/ggbiplot).
+```{r, message=FALSE, fig.cap='PC1 vs. PC2 con cada clase'}
+library(ggbiplot)
+ggbiplot(pca, obs.scale=1, var.scale=1,
+         groups=trainingBase$label, ellipse=TRUE, circle=TRUE,
+         alpha=0.25) +
+         scale_color_discrete(name='') + 
+         theme(legend.direction='horizontal', legend.position='top')
+```
+
+De esta gráfica (\texttt{Figura 10}) se puede extraer que a pesar de no tener una separación plenamente clara entre las dos clases, sí se puede ver que cuando la PC1 y PC2 toman valores positivos (cuadrante superior derecho), la clase es *'female'*, mientras que cuando PC1 es negativo (independientemente del valor de PC2), generalmente la clase es *'male'*.
+
+Recordemos que las componentes principales son combinaciones lineales de las variables originales. Los pesos de cada variable original en estas nuevas componentes se pueden ver en la matriz 12x12 que muestra la sección *Rotation*:
+
+$$
+PC_j = \sum_{i = 1}^{12}{w_i \times X_i}     \quad\quad\quad   1\leq j\leq 12
+$$
+
+```{r}
+pca$rotation
+```
+
+Por ejemplo, las dos componentes principales en este ejercicio serían:
+$$
+PC_1 = (0.4199184 \times median) + (0.2848441 \times Q75) - (0.3330073 \times IQR) -
+$$
+$$
+(0.185731 \times kurt) - (0.327417 \times sp.ent) + (0.3825853 \times mode) +
+$$
+$$
+(0.3114205 \times meanfun) + (0.2668212 \times minfun) + (0.1844461 \times maxfun) +
+$$
+$$
+(0.3284787 \times meandom) + (0.1428324 \times mindom) - (0.1143365 \times modindx)
+$$
+
+$$
+PC_2 = (-0.0950030147 \times median) - (0.3628411461 \times Q75) - (0.3676992877  \times IQR) -
+$$
+$$
+(-0.1354436250 \times kurt) - (0.1991776067 \times sp.ent) - (0.0399646470 \times mode) +
+$$
+$$
+(0.1557273784 \times meanfun) + (0.0003266332 \times minfun) - (0.4316993088 \times maxfun) -
+$$
+$$
+(0.1345968005 \times meandom) + (0.4957604409 \times mindom) + (0.4358829733 \times modindx)
+$$
+
+Si se deseara aplicar este PCA a nuestro conjunto de datos, bastaría con utilizar la función \texttt{predict} de \texttt{caret}, quedándonos solamente con las 6 primeras componentes y añadiendo la variable clase:
+```{r}
+trainingFE <- predict(pca,newdata=trainingBase)[,1:6]
+trainingFE <- as.data.frame(trainingFE)
+trainingFE$label <- trainingBase$label
+colnames(trainingFE)
+```
+Sin embargo, no se va a utilizar realmente este dataset *trainingFE* durante el entrenamiento, ya que no nos daría un resultado honesto (esto se explicará en el apartado 4.1.3).
+\newpage
+
+# 4. Entrenamiento
+
+Como se indicó al inicio de este *notebook*, se va a realizar un entrenamiento con 3 conjuntos de datos procesados de manera diferente (con procesamiento base, con selección de variables, y con extracción de variables por PCA), utilizando dos clasificadores distintos, para posteriormente comparar en qué caso ha rendido mejor. La propia [página de presentación del dataset](https://www.kaggle.com/datasets/primaryobjects/voicegender) ya indica muy buenos resultados con regresión logística, CART, XGBoost, etc., por lo que se intenta probar otros clasificadores.
+
+Al tratarse de una clasificación binaria, se van a utilizar dos algoritmos de clasificación ampliamente conocidos como son el **Support Vector Machine** (aunque con una pequeña variación para diferenciarlo del trabajo de los autores del dataset) y **k-Nearest Neighbors**.
+
+Pero antes de adentrarnos en el en entrenamiento, se va a configurar la variable \texttt{trainControl], con el objetivo de poder controlar ciertos aspectos del entrenamiento de manera sencilla. En este caso, se opta por una **validación cruzada *10-fold* sin repetición**:
+```{r}
+trainControl <- trainControl(
+  method='cv',
+  number=10,
+  allowParallel=TRUE)
+```
+
+Cabe mencionar que, al tratarse de un dataset con un balanceo perfecto de clases, se opta por utilizar como métrica de decisión sobre el mejor modelo la **Accuracy**:
+$$
+Accuracy = \frac{TP+TN}{TP+FP+TN+FN}
+$$
+Siendo *TP* los positivos verdaderos, *TN* los negativos verdaderos, *FP* los falsos positivos y *FN* los falsos negativos. Por lo tanto, se puede considerar la *accuracy* como la fracción entre los bien clasificados y todos los clasificados. Esta naturaleza hace que en un escenario como el de este ejercicio, de un conjunto de datos perfectamente balanceado, esta sea una métrica válida, mientras que en un caso de desbalanceo de clases, sería engañosa.
+
+A continuación se muestra un ejemplo a modo de justificación:
+
+* **Caso desbalanceado:** Tenemos 10 muestras (9 son de la clase A y 1 de la B) y nuestro algoritmo clasifica perfectamente la clase A pero no la clase B. El resultado es una **ccuracy* del 90%, cuando en realidad solo es capaz de detectar una de las clases.
+* **Caso balanceado:** Por otro lado, si de las 10 muestras tenemos 5 de cada clase y nuestro algoritmo clasifica bien solamente una de las clases, tendremos una *accuracy* del 50%, por lo que no estaremos "auto-engañándonos" con la métrica (lo mismo aplicaría para otros porcentajes del resultado).
+
+
+## 4.1. Clasificador Support Vector Machine (SVM) con función kernel de base radial
+Conocido en inglés como ***Support Vector Machine with Radial Basis Function Kernel* (SVM-RBF)**, este es un clasificador que, al igual que un **SVM** convencional, trata de encontrar una frontera lineal (un hiperplano) que permita diferenciar las clases bajo estudio, maximizando la distancia de esta con los puntos de cada clase.
+
+El aspecto clave de este algoritmo es que, generalmente, los datasets con los que se trabaja no son linealmente separables, por lo que es necesario transformar el espacio de características (variables predictoras) a otra dimensión donde sí lo sean. Es aquí donde entra en juego la **función kernel de base radial**, que, como otras funciones kernel, convierte el espacio de entrada de dimensión reducida en otro espacio de dimensión mayor. El aspecto diferenciador de la base radial es que es más potente y eficiente que otros kernels lineales o polinómicos, al combinar diferentes kernels de este tipo.
+
+En concreto, la función de base radial utilizada por este kernel es la siguiente:
+$$
+K(X_1,X_2) = exp(- \frac{||X_1-X_2||^{2}}{2\sigma^2})
+$$
+Siendo el numerador la *distancia euclídea al cuadrado* y $\sigma$ un parámetro libre. Si se introduce el parámetro $\gamma=\frac{1}{2\sigma^2}$, la función queda como sigue:
+$$
+K(X_1,X_2) = exp(- \gamma||X_1-X_2||^2)
+$$
+Esto permite tomar ventaja del "*truco del kernel*", al evitarnos transformar los datos directamente, encontrando la transformación de los productos internos para realizar el mapeo a dimensiones superiores.
+
+
+### 4.1.1. SVM-RBF con datos base
+En primer lugar, se va a realizar el entrenamiento con los datos "base", es decir, tras eliminar las variables sin varianza, las correladas y aquellas que pudieran tener dependencias lineales (que en el caso de este dataset, no hay ninguna de este último caso). Por lo tanto, el conjunto de datos utilizado en este entrenamiento es anterior a la selección y extracción de variables (*trainingBase*).
+
+Además, es en este ejemplo donde se va a profundizar más en las diferencias entre las opciones de entrenamiento ***tuneLength*** y ***tuneGrid***, tal y como se pide en el enunciado del trabajo.
+
+#### Entrenamiento con tuneLength
+$\newline$
+Esta opción nos va a permitir delegar en \texttt{caret} el *tuning* de los hiperparámetros de nuestro modelo, que, en este son el **coste (C)** y la **$\sigma$ en nuestra fórmula**:
+
+* **C:** Por lo que se ha podido encontrar en implementaciones de este algoritmo en otros paquetes como [scikit-learn](https://scikit-learn.org/stable/auto_examples/svm/plot_rbf_parameters.html), este coste es un parámetro de regularización, que actúa sobre la maximización de la función de decisión. A mayor valor tome, más estricto es el umbral dedecisión, y a menor valor, menos estricto es este umbral.
+* **$\sigma$:** Como se puede ver en la fórmula es un parámetro que actúa sobre $\gamma$. Este $\gamma$ se puede ver como el inverso del radio de influencia de las muestras seleccionadas por el modelo como vectores soporte. Esto es, cuando toma un valor reducido ($\sigma$ alto) estos tienen poca influencia, mientras que si toma un valor elevado ($\sigma$ bajo) su influencia es mayor. 
+
+En este caso, vamos a pedir a \texttt{caret} que haga el entrenamiento probando con 10 valores diferentes de estos hiperparámetros (tal y como se puede ver en la [documentación, sección Support Vector Machines With Radial Basis Function Kernel](https://topepo.github.io/caret/train-models-by-tag.html), cuando se utiliza *tuneLength* se tomarán 10 valores de *C* y solamente un máximo de 6 para *$\sigma$*):
+```{r, cache=TRUE}
+set.seed(206)
+svmBase = train(label ~ ., data=trainingBase, method='svmRadialSigma', 
+                tuneLength=10, metric='Accuracy',
+                trControl=trainControl, preProc=c("center","scale"))
+svmBase
+```
+
+```{r, echo=TRUE, warning=FALSE, cache=FALSE, fig.cap='Evolución de accuracy para cada hiperparámetro durante el entrenamiento'}
+ggplot(svmBase)
+```
+
+Tras el entrenamiento \texttt{Figura 11}, se puede ver cómo \texttt{caret} ha probado 10 valores diferentes del hiperparámetro **C** y 6 de **$\sigma$** llevando a tener, como valores óptimos, **$C=8$** y **$\sigma=0.1343586$**, lo que nos da una **$accuracy=0.9797964$**. Con la gráfica parece que se puede intuir que con mayor coste, la *accuracy* se ve altamente afectada, lo que tiene sentido, ya que este hiperparámetro se utiliza como regularizador.
+
+#### Entrenamiento con tuneGrid
+$\newline$
+Ahora, al utilizar *tuneGrid*, también vamos a actuar sobre el *tuning* de los hiperparámetros de nuestro modelo. Sin embargo, con esta variable, somos nosotros los que seleccionamos qué valores dar a cada hiperparámetro.
+
+En este caso, vamos a pedir a \texttt{caret} que haga el entrenamiento probando con 10 valores diferentes de estos hiperparámetros, siguiendo el comportamiento con *tuneLength*, es decir, 10 valores para *C* y 6 para *$\sigma$*:
+```{r, cache=TRUE}
+set.seed(206)
+svmBaseGrid = 
+  train(label ~ ., data=trainingBase, method='svmRadialSigma', 
+        tuneGrid=expand.grid(sigma=seq(0.01,0.2,length.out=6),
+                             C=c(1:8,50,100)),
+        metric='Accuracy',trControl=trainControl, 
+        preProc=c("center","scale"))
+
+svmBaseGrid
+```
+
+```{r, echo=TRUE, warning=FALSE, cache=FALSE, fig.cap='Evolución de accuracy para cada hiperparámetro durante el entrenamiento'}
+ggplot(svmBaseGrid)
+```
+
+Tras el entrenamiento \texttt{Figura 12}, se puede ver cómo \texttt{caret} ha probado 10 valores diferentes del hiperparámetro **C** y 6 de **$\sigma$** llevando a tener, como valores óptimos, **$C=8$** y **$\sigma=0.2$**, lo que nos da una **$accuracy=0.9797982$**. De nuevo, y como era de esperar, obtenemos un gráfica semejante a la que obteníamos con *tuneLength*.
+
+El resultado obtenido es ligeramente superior al anterior, para un valor de $\sigma$ más elevado. Como conclusión de esta comparativa se puede sacar que *tuneLength* lo podemos utilizar como una primera aproximación al entrenamiento, probando, aleatoriamente con ciertos valores de los hiperparámetros, mientras que *tuneGrid* puede utilizarse para refinar más el modelo, o si se tiene muy claro qué efectos pueden provocar los valores de los hiperparámetros, ya que da mucho más control sobre el entrenamiento.
+\newpage
+
+### 4.1.2. SVM-RBF con selección de variables
+A continuación, se va a utilizar el conjunto de datos sobre el que se ejecutó la selección de variables, tras la que nos quedamos solamente con *meanfun* e *IQR*.
+
+El entrenamiento se realizará con *tunelength* por simplicidad, almacenándolo en una variable distinta a la del anterior modelo:
+```{r, cache=TRUE}
+set.seed(206)
+svmFS = train(label ~ ., data=trainingFS, method='svmRadialSigma', 
+              tuneLength=10, metric='Accuracy',
+              trControl=trainControl, preProc=c("center","scale"))
+
+svmFS
+```
+
+```{r, echo=TRUE, warning=FALSE, cache=FALSE, fig.cap='Evolución de accuracy para cada hiperparámetro durante el entrenamiento'}
+ggplot(svmFS)
+```
+
+En este caso se tiene un valor óptimo de **$accuracy=0.9709640$** para **$C=1$** y **$\sigma=0.123122$**, algo inferior al obtenido con el anterior modelo, pero con muchas menos variables (recordemos que pasamos de 12 a solamente 2).
+\newpage
+
+### 4.1.3. SVM-RBF con PCA
+Finalmente, se realiza el entrenamiento del modelo con PCA. En este caso, en lugar de utilizar el dataset resultante del apartado 3.2, y por obtener un resultado más honesto, se va a realizar el PCA por cada *fold*. Por defecto, \texttt{caret} se queda con las componentes que mantienen, al menos, el 95% de la varianza de los datos, por lo que solicitamos a \texttt{caret} que se quede con las primeras 6 componentes prioncipales, que es el resultado que obtuvimos en el apartado 3.2.
+```{r}
+trainControlPCA <- trainControl(
+  method='cv',
+  number=10,
+  allowParallel=TRUE,
+  preProcOptions=list(pcaComp=6)
+)
+```
+```{r, cache=TRUE}
+set.seed(206)
+svmPCA = train(label ~ ., data=trainingBase, method='svmRadialSigma', 
+               tuneLength=10, metric='Accuracy',
+               trControl=trainControlPCA, 
+               preProc=c("center","scale","pca"))
+
+svmPCA
+```
+
+```{r, echo=TRUE, warning=FALSE, cache=FALSE, fig.cap='Evolución de accuracy para cada hiperparámetro durante el entrenamiento'}
+ggplot(svmPCA)
+```
+
+Para el PCA obtenemos un valor óptimo de **$accuracy=0.9654894$** para **$C=32$** y **$\sigma=0.1493163$**, inferior a los dos anteriores, pero ahora con 6 variables, por lo que parece que el PCA no está aportando ninguna ayuda al clasificador.
+\newpage
+
+## 4.2. Clasificador k-Nearest Neighbors
+El algoritmo ***k-Nearest Neighbors (k-NN)*** es uno de los algoritmos más conocidos en Minería de Datos, que en este caso se va a utilizar para la clasificación de nuestro interés.
+
+La forma en la que este algoritmo decide la etiqueta de una muestra (la clasifica) se basa en la clasificación de sus vecinos más cercanos. El método que utiliza es un "voto por mayoría" ya que asigna la etiqueta que más se repite entre los vecinos, aunque este término no es preciso al no requerir que la mayoría de los vecinos compartan la etiqueta, simplemente asigna la que más se repite entre ellos.
+
+En este algoritmo entran en juego, por tanto, dos parámetros principalmente:
+
+* **k:** Es el número de vecinos con los que comparar. Valores elevados de este parámetro aumenta el sesgo y reduce la varianza, mientras que lo contrario ocurre con valores bajos de este.
+* **Distancia:** La forma de calcular la distancia entre el nuevo valor y sus vecinos, como por ejemplo la distancia euclídea, de Manhattan, o de Hamming, entre otras.
+
+El paquete \texttt{caret} implementa, por defecto, la distancia euclídea (línea recta entre dos puntos) para este algoritmo, por lo que utilizaremos el parámetro *tuneLength* para que realice el entrenamiento con 10 valores distintos de **k** (o *$k_{max}$*).
+
+$$
+d(x,y) = \sqrt{\sum_{i = 1}^{k}{(y_i - x_i)^2}}
+$$
+
+
+### 4.2.1. kNN con datos base
+Ahora, se va a entrenar el algoritmo kNN con los datos tras el procesamiento pero sin la selección ni extracción de variables (*trainingBase*). El entrenamiento se realiza con las mismas condiciones que en la anterior sección 4.1, pero cambiando solamente el algoritmo.
+```{r, cache=TRUE}
+set.seed(206)
+knnBase = train(label ~ ., data=trainingBase, method='knn', 
+                tuneGrid=expand.grid(k=c(1:15)), metric='Accuracy',
+                trControl=trainControl, preProc=c("center","scale"))
+knnBase
+```
+```{r, echo=TRUE, warning=FALSE, cache=FALSE, out.width='50%', fig.align='center', fig.cap='Evolución de accuracy para cada hiperparámetro durante el entrenamiento'}
+ggplot(knnBase)
+```
+El resultado obtenido es de **$accuracy=0.9684501$** para una **$k=7$**, semejante al peor de los casos con SVM-RBF.
+
+
+### 4.2.2. kNN con selección de variables
+De igual manera, se mantienen mismas condiciones que en el apartado 4.1.2 para realizar el entrenamiento con el conjunto de datos tras la selección de variables (*trainingFS*).
+```{r, cache=TRUE}
+set.seed(206)
+knnFS = train(label ~ ., data=trainingFS, method='knn', 
+              tuneGrid=expand.grid(k=c(1:15)), metric='Accuracy',
+              trControl=trainControl, preProc=c("center","scale"))
+
+knnFS
+```
+```{r, echo=TRUE, warning=FALSE, cache=FALSE, out.width='50%', fig.align='center', fig.cap='Evolución de accuracy para cada hiperparámetro durante el entrenamiento'}
+ggplot(knnFS)
+```
+En este caso se obtiene un resultado de **$accuracy=0.9676008$** para una **$k=14$**, que indica la relación que se veía con el anterior modelo (la diferencia entre usar todas las variables predictoras y solamente las dos extraídas es reducida desde un punto de vista de la validación del entrenamiento).
+
+
+### 4.2.3. kNN con PCA
+Y finalmente, se realiza el entrenamiento con la extracción de variables mediante PCA para cada uno de los *folds*.
+
+```{r, cache=TRUE}
+set.seed(206)
+knnPCA = train(label ~ ., data=trainingBase, method='knn', 
+               tuneGrid=expand.grid(k=c(1:15)), metric='Accuracy',
+               trControl=trainControlPCA, 
+               preProc=c("center","scale","pca"))
+
+knnPCA
+```
+
+```{r, echo=TRUE, warning=FALSE, cache=FALSE, out.width='50%', fig.align='center', fig.cap='Evolución de accuracy para cada hiperparámetro durante el entrenamiento'}
+ggplot(knnPCA)
+```
+\newpage
+
+# 5. Comparativa de resultados
+En primer lugar, y por completitud del análisis, se va a revisar qué variables han tenido la mayor importancia durante el entrenamiento para cada modelo. Para ello, hacemos uso de la función \texttt{varImp} y mostramos gráficamente el porcentaje de importancia en cada caso:
+```{r, echo=TRUE, warning=FALSE, cache=FALSE}
+ggplotVarImportance <- function(m,mytitle){
+  p <-    ggplot(data = varImp(object=m)) + theme(legend.position = "none") +
+                 ggtitle(mytitle)
+  return(p)
+}
+```
+```{r, echo=FALSE, warning=FALSE, cache=FALSE, fig.show='hold', out.width='50%', fig.cap='Importancia de cada variables para modelos base'}
+ggplotVarImportance(svmBase,"SVM-RBF Base - Importancia de las Variables")
+ggplotVarImportance(knnBase,"kNN Base - Importancia de las Variables")
+```
+```{r, echo=FALSE, warning=FALSE, cache=FALSE, fig.show='hold', out.width='50%', fig.cap='Importancia de cada variables para modelos con selección de variables'}
+ggplotVarImportance(svmFS,"SVM-RBF Feature Selection - Importancia de las Variables")
+ggplotVarImportance(knnFS,"kNN Feature Selection - Importancia de las Variables")
+```
+```{r, echo=FALSE, warning=FALSE, cache=FALSE, fig.show='hold', out.width='50%', fig.cap='Importancia de cada variables para con PCA'}
+ggplotVarImportance(svmPCA,"SVM-RBF PCA - Importancia de las Variables")
+ggplotVarImportance(knnPCA,"kNN PCA - Importancia de las Variables")
+```
+\newpage
+
+Estas gráficas (\texttt{Figura 18-20}) sustentan lo que se decía al inicio del trabajo (y que también se presenta como conclusión por los autores del dataset): las cariables *meanfun* e *IQR* son las más determinantes a la hora de la clasificación, y, en el caso de extracción de vairables *meanfun* adquiere el 100% de importancia, ya que es la primera caracterísitica a considerar de cara a decidir la clase.
+
+Ahora, una vez visto qué variables afectan en mayor medida al entrenamiento, pasamos a comparar los modelos a través de una comparativa directa de los resultados de evaluación interna (de igual manera que en el enunciado del ejercicio). Esto se puede realizar porque, al igual que se ha comentado durante este trabajo, la semilla de aleatorización es siempre la misma, por lo que las particiones (*folds*) siempre van a realizarse de igual manera.
+
+Para ello, vamos a utilizar la función \texttt{resamples}:
+```{r, echo=TRUE, warning=FALSE, cache=FALSE,out.width='50%', fig.align='center', fig.cap='Comparativa de los modelos'}
+resamps=resamples(list(svmBase=svmBase,svmFS=svmFS,svmPCA=svmPCA,
+                       knnBase=knnBase,knnFS=knnFS,knnPCA=knnPCA), 
+                  metric="Accuracy")
+summary(resamps)
+```
+
+La gráfica nos indica que durante la validación, el modelo \texttt{svmBase} supera al resto, pero es necesario comprobar su rendimiento con datos de test, por lo que,finalmente, se va a realizar una comparación desde el punto de vista de la predicción que realizan estos clasificadores para el set de test. Para las predicciones se utiliza la función \texttt{predict}, que solamente nos va a permitir trabajar con la opción \texttt{type="raw"} o \texttt{type="prob"} por los clasificadores que se han utilizado y por ser una clasificación binaria.
+
+Cabe destacar que el modelo de \texttt{caret} almacena tanto el preprocesamiento con el que lo hemos entrenado (variable \texttt{caret}) como las variales a utilizar. Por lo tanto, durante la ejecución de \texttt{predict} se aplicará lo mismo sobre nuestro conjunto de datos de test (lo normalizará en todos los casos, se quedará con las variables que corresponda en cada caso y aplicará el PCA en el modelo entrenado para ello). Por lo tanto, podemos pasarle a esta función el conjunto de datos de test inicial.
+
+A continuación (\texttt{Figura 21-26}), por cada modelo, se presenta la matriz de confusión obtenida que nos indica, por cada clase, el número de muestras bien y mal clasificadas para todo el set de datos de test, además del *accuracy* asociado a dicha predicción.
+```{r, echo=TRUE, warning=FALSE, cache=FALSE}
+ggplotConfusionMatrix <- function(m){
+  mytitle <- paste("Accuracy", percent_format()(m$overall[1]),
+                   "Kappa", percent_format()(m$overall[2]))
+  p <-
+    ggplot(data = as.data.frame(m$table) ,
+           aes(x = Reference, y = Prediction)) +
+    geom_tile(aes(fill = log(Freq)), colour = "white") +
+    scale_fill_gradient(low = "bisque", high = "bisque3") +
+    geom_text(aes(x = Reference, y = Prediction, label = Freq)) +
+    theme(legend.position = "none") +
+    ggtitle(mytitle)
+  return(p)
+}
+```
+
+```{r, echo=TRUE, warning=FALSE, cache=FALSE, out.width = '75%', fig.align = 'center', fig.cap='Matriz de confusión de predicciones para svmBase'}
+svmBase_predictions <- predict(svmBase, newdata=testing, type="raw")
+cMsvmBase <- confusionMatrix(reference = testing$label, 
+                             data = svmBase_predictions, mode='everything',
+                             positive='female')
+ggplotConfusionMatrix(cMsvmBase)
+```
+```{r, echo=TRUE, warning=FALSE, cache=FALSE, out.width = '75%', fig.align = 'center', fig.cap='Matriz de confusión de predicciones para svmFS'}
+svmFS_predictions <- predict(svmFS, newdata=testing, type="raw")
+cMsvmFS <- confusionMatrix(reference = testing$label, 
+                           data = svmFS_predictions, mode='everything',
+                           positive='female')
+ggplotConfusionMatrix(cMsvmFS)
+```
+```{r, echo=TRUE, warning=FALSE, cache=FALSE, out.width = '75%', fig.align = 'center', fig.cap='Matriz de confusión de predicciones para svmPCA'}
+svmPCA_predictions <- predict(svmPCA, newdata=testing, type="raw")
+cMsvmPCA <- confusionMatrix(reference = testing$label, 
+                            data = svmPCA_predictions, mode='everything',
+                            positive='female')
+ggplotConfusionMatrix(cMsvmPCA)
+```
+```{r, echo=TRUE, warning=FALSE, cache=FALSE, out.width = '75%', fig.align = 'center', fig.cap='Matriz de confusión de predicciones para knnBase'}
+knnBase_predictions <- predict(knnBase, newdata=testing, type="raw")
+cMknnBase <- confusionMatrix(reference = testing$label, 
+                             data = knnBase_predictions, mode='everything',
+                             positive='female')
+ggplotConfusionMatrix(cMknnBase)
+```
+```{r, echo=TRUE, warning=FALSE, cache=FALSE, out.width = '75%', fig.align = 'center', fig.cap='Matriz de confusión de predicciones para knnFS'}
+knnFS_predictions <- predict(knnFS, newdata=testing, type="raw")
+cMknnFS <- confusionMatrix(reference = testing$label, 
+                           data = knnFS_predictions, mode='everything',
+                           positive='female')
+ggplotConfusionMatrix(cMknnFS)
+```
+```{r, echo=TRUE, warning=FALSE, cache=FALSE, out.width = '75%', fig.align = 'center', fig.cap='Matriz de confusión de predicciones para knnPCA'}
+knnPCA_predictions <- predict(knnPCA, newdata=testing, type="raw")
+cMknnPCA <- confusionMatrix(reference = testing$label, 
+                            data = knnPCA_predictions, mode='everything',
+                            positive='female')
+ggplotConfusionMatrix(cMknnPCA)
+```
+\newpage
+
+Tras revisar las matrices de confusión, cabe destacar que todos los algoritmos obtienen una *accuracy* elevada, quedando claro que los modelos entrenados con el dataset "base" se comportan mejor que el resto. De esta manera, tiene sentido hacer una última comparación, esta vez entre los modelos \texttt{svmBase} y \texttt{knnBase}, que son los que mejor se han comportado durante el test.
+
+Para ello, se va a utilizar de nuevo la función \texttt{resamples} y se va a mostrar la gráfica Bland-Altman (\texttt{Figura 27}) como en le enunciado del ejercicio. Posteriormente se calcula la diferencia de las medias de rendmiento de cada clasificador, a través de la función \texttt{diff}:
+```{r, echo=TRUE, warning=FALSE, cache=FALSE, out.width = '75%', fig.align = 'center', fig.cap='Blan-Altman para los dos mejores modelos clasificadores'}
+resamps2=resamples(list(svmBase=svmBase, knnBase=knnBase), metric="Accuracy")
+xyplot(resamps2,what="BlandAltman")
+```
+\newpage
+```{r}
+diffs<-diff(resamps2)
+summary(diffs)
+```
+
+Como se puede observar, el *$p-value=0.006755$*, un orden de magnitud menor que 0.05, por lo que se puede considerar que ambos clasificadores son significativamente diferentes desde el punto de vista estadístico. 
