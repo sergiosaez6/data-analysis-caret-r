@@ -33,7 +33,7 @@ knitr::opts_chunk$set(echo = TRUE)
 # 1. Introducción
 ## 1.1. Dataset seleccionado
 
-Para este ejercicio se ha decidido optar por un dataset de [Kaggle](https://Kaggle.com)  conformado por estadísticos frecuenciales de distintas señales de voz, cuyo objetivo es permitir la clasificación del género del emisor. Este dataset es conocido como ***[Gender Recognition by Voice](https://www.kaggle.com/datasets/primaryobjects/voicegender)*** y el fichero RMarkdown relativo a este trabajo se encuentra en el siguiente enlace de [GitHub](https://github.com/sergiosaez6/data-analysis-caret-r).
+Para este ejercicio se ha decidido optar por un dataset de [Kaggle](https://Kaggle.com)  conformado por estadísticos frecuenciales de distintas señales de voz, cuyo objetivo es permitir la clasificación del género del emisor (***[Gender Recognition by Voice](https://www.kaggle.com/datasets/primaryobjects/voicegender)***). El fichero RMarkdown relativo a este trabajo se encuentra en el siguiente enlace de [GitHub](https://github.com/sergiosaez6/data-analysis-caret-r).
 
 En primer lugar, vamos a cargar el dataset elegido en R, con el objetivo de comenzar la exploración de este y la toma de decisiones en cuanto a su preparación para nuestro modelo de clasificación:
 
