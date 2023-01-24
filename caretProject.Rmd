@@ -24,7 +24,6 @@ output:
     toc_depth: 3
 ---
 
-
 \newpage
 
 ```{r setup, include=FALSE}
@@ -755,4 +754,4 @@ diffs<-diff(resamps2, adjustment="bonferroni", test=t.test, confLevel=0.95)
 summary(diffs)
 ```
 
-Como se puede observar, el *$p-value=0.006756$* para la diferencia de medias de *accuracy*, un orden de magnitud menor que el $p-value=0.05$, por lo que se puede considerar que ambos clasificadores son significativamente diferentes desde el punto de vista estadístico (la hipótesis nula es que la diferencia de las medias era 0, por lo tanto, que eran semejantes).
+Como se puede observar, el *$p-value=0.006756$* para la diferencia de medias de *accuracy*, un orden de magnitud menor que el $p-value=0.05$, por lo que se puede considerar que ambos clasificadores son significativamente diferentes desde el punto de vista estadístico (la hipótesis nula es que la diferencia de las medias era 0, es decir, que eran semejantes).
