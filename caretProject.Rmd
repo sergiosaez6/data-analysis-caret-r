@@ -637,6 +637,8 @@ knnPCA
 ```{r, echo=TRUE, warning=FALSE, cache=FALSE, out.width='50%', fig.align='center', fig.cap='Evolución de accuracy para cada hiperparámetro durante el entrenamiento'}
 ggplot(knnPCA)
 ```
+Finalmente, con PCA se obtiene una **$accuracy=0.9676008$** durante la validación para una **$k=7$**.
+
 \newpage
 
 # 5. Comparativa de resultados
@@ -747,9 +749,9 @@ resamps2=resamples(list(svmBase=svmBase, knnBase=knnBase), metric="Accuracy")
 xyplot(resamps2,what="BlandAltman")
 ```
 \newpage
-```{r}
-diffs<-diff(resamps2)
+```{r, cache=TRUE}
+diffs<-diff(resamps2, adjustment="bonferroni", test=t.test, confLevel=0.95)
 summary(diffs)
 ```
 
-Como se puede observar, el *$p-value=0.006755$*, un orden de magnitud menor que 0.05, por lo que se puede considerar que ambos clasificadores son significativamente diferentes desde el punto de vista estadístico. 
+Como se puede observar, el *$p-value=0.006756$* para la diferencia de medias de *accuracy*, un orden de magnitud menor que el $p-value=0.05$, por lo que se puede considerar que ambos clasificadores son significativamente diferentes desde el punto de vista estadístico (la hipótesis nula es que la diferencia de las medias era 0, por lo tanto, que eran semejantes).
