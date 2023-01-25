@@ -2,8 +2,8 @@
 document_class: article
 title: "**Métodos supervisados: Reconocimiento de género basado en voz**"
 subtitle: ""
-author: "Sergio Sáez Bombín"
-date: "23-01-2023"
+author: "Sergio Sáez Bombín [100007762@alumnos.uimp.es]"
+date: "25-01-2023"
 classoption: titlepage,twoside
 urlcolor: blue
 lang: ES
@@ -396,29 +396,29 @@ pca$rotation
 
 Por ejemplo, las dos componentes principales en este ejercicio serían:
 $$
-PC_1 = (0.4199184 \times median) + (0.2848441 \times Q75) - (0.3330073 \times IQR) -
+PC_1 = (0.4177783 \times median) + (0.2830979 \times Q75) - (0.3262841 \times IQR) -
 $$
 $$
-(0.185731 \times kurt) - (0.327417 \times sp.ent) + (0.3825853 \times mode) +
+(1834230 \times kurt) - (0.3135638 \times sp.ent) + (0.3800822 \times mode) +
 $$
 $$
-(0.3114205 \times meanfun) + (0.2668212 \times minfun) + (0.1844461 \times maxfun) +
+(0.3178615 \times meanfun) + (0.2749328 \times minfun) + (0.2029431 \times maxfun) +
 $$
 $$
-(0.3284787 \times meandom) + (0.1428324 \times mindom) - (0.1143365 \times modindx)
+(0.3338909 \times meandom) + (0.1238045 \times mindom) - (0.1334400 \times modindx)
 $$
 
 $$
-PC_2 = (-0.0950030147 \times median) - (0.3628411461 \times Q75) - (0.3676992877  \times IQR) -
+PC_2 = (-0.0814136658 \times median) - (0.3476275299 \times Q75) - (0.3753267077  \times IQR) -
 $$
 $$
-(-0.1354436250 \times kurt) - (0.1991776067 \times sp.ent) - (0.0399646470 \times mode) +
+(-0.1807885156 \times kurt) - (0.1891926361 \times sp.ent) - (0.0151021143 \times mode) +
 $$
 $$
-(0.1557273784 \times meanfun) + (0.0003266332 \times minfun) - (0.4316993088 \times maxfun) -
+(0.1387576565 \times meanfun) + (0.0007528243 \times minfun) - (0.4348259478 \times maxfun) -
 $$
 $$
-(0.1345968005 \times meandom) + (0.4957604409 \times mindom) + (0.4358829733 \times modindx)
+(0.1064791249 \times meandom) + (0.4980567051 \times mndom) + (0.4418418481 \times modindx)
 $$
 
 Si se deseara aplicar este PCA a nuestro conjunto de datos, bastaría con utilizar la función \texttt{predict} de \texttt{caret}, quedándonos solamente con las 6 primeras componentes y añadiendo la variable clase:
@@ -543,7 +543,7 @@ svmFS
 ggplot(svmFS)
 ```
 
-En este caso se tiene un valor óptimo de **$accuracy=0.9709640$** para **$C=1$** y **$\sigma=0.123122$**, algo inferior al obtenido con el anterior modelo, pero con muchas menos variables (recordemos que pasamos de 12 a solamente 2).
+En este caso se tiene un valor óptimo de **$accuracy=0.9709640$** para **$C=1$** y **$\sigma=1.123122$**, algo inferior al obtenido con el anterior modelo, pero con muchas menos variables (recordemos que pasamos de 12 a solamente 2).
 \newpage
 
 ### 4.1.3. SVM-RBF con PCA
@@ -602,7 +602,7 @@ knnBase
 ```{r, echo=TRUE, warning=FALSE, cache=FALSE, out.width='50%', fig.align='center', fig.cap='Evolución de accuracy para cada hiperparámetro durante el entrenamiento'}
 ggplot(knnBase)
 ```
-El resultado obtenido es de **$accuracy=0.9684501$** para una **$k=7$**, semejante al peor de los casos con SVM-RBF.
+El resultado obtenido es de **$accuracy=0.9697106$** para una **$k=7$**, semejante al peor de los casos con SVM-RBF.
 
 
 ### 4.2.2. kNN con selección de variables
@@ -637,7 +637,7 @@ knnPCA
 ```{r, echo=TRUE, warning=FALSE, cache=FALSE, out.width='50%', fig.align='center', fig.cap='Evolución de accuracy para cada hiperparámetro durante el entrenamiento'}
 ggplot(knnPCA)
 ```
-Finalmente, con PCA se obtiene una **$accuracy=0.9676008$** durante la validación para una **$k=7$**.
+Finalmente, con PCA se obtiene una **$accuracy=0.9579228$** durante la validación para una **$k=7$**.
 
 \newpage
 
@@ -754,4 +754,4 @@ diffs<-diff(resamps2, adjustment="bonferroni", test=t.test, confLevel=0.95)
 summary(diffs)
 ```
 
-Como se puede observar, el *$p-value=0.006756$* para la diferencia de medias de *accuracy*, un orden de magnitud menor que el $p-value=0.05$, por lo que se puede considerar que ambos clasificadores son significativamente diferentes desde el punto de vista estadístico (la hipótesis nula es que la diferencia de las medias era 0, es decir, que eran semejantes).
+Como se puede observar, el *$p-value=0.006755$* para la diferencia de medias de *accuracy*, un orden de magnitud menor que el $p-value=0.05$, por lo que se puede considerar que ambos clasificadores son significativamente diferentes desde el punto de vista estadístico (la hipótesis nula es que la diferencia de las medias era 0, es decir, que eran semejantes).
